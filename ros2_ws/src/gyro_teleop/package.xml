@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>gyro_teleop</name>
+  <version>0.1.0</version>
+  <description>Gyroscope-Teleop: stream an iPhone's fused orientation (roll/pitch/yaw) to ROS 2 topics (joy, cmd_vel, target_pose, grip) with deadman safety. Consumes the companion Flask server.</description>
+  <maintainer email="andrew@cavalla.ro">ac</maintainer>
+  <license>TODO</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <!-- Optional: low-latency WebSocket stream. Without it the node falls back
+       to stdlib HTTP polling automatically. -->
+  <exec_depend>python3-websocket</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

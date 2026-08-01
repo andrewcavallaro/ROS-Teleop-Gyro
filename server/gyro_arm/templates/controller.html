@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Gyro Arm — Controller</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Loaded async so the page renders instantly even with no internet (hotspot with cellular off). -->
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<style>
+  :root{
+    --bg:#0b0f13; --panel:#141a21; --panel2:#10151b; --line:#26303a;
+    --ink:#e8edf2; --muted:#7f8c99; --faint:#4a5560;
+    --ax-x:#ffb454; --ax-y:#5fd4c4; --ax-r:#ff6b81; --ok:#7ede8a;
+    --display:"Chakra Petch",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;position:fixed;width:100%;overscroll-behavior:none;touch-action:manipulation}
+  body{
+    background:var(--bg);color:var(--ink);font-family:var(--mono);
+    display:flex;flex-direction:column;gap:12px;
+    padding:calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 14px);
+  }
+  header{display:flex;align-items:center}
+  .wordmark{font-family:var(--display);font-weight:600;font-size:15px;letter-spacing:.14em}
+  .wordmark em{font-style:normal;color:var(--ax-y)}
+  .chip{margin-left:auto;display:flex;gap:7px;align-items:center;border:1px solid var(--line);
+        border-radius:3px;padding:5px 10px;font-size:11px;color:var(--muted);background:var(--panel2)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+  .chip.live{color:var(--ink)} .chip.live .dot{background:var(--ok)}
+
+  .rows{flex:1;display:flex;flex-direction:column;gap:10px;min-height:0}
+  .row{
+    flex:1;display:flex;align-items:center;gap:12px;border:1px solid var(--line);
+    border-left-width:4px;border-radius:4px;background:var(--panel);padding:10px 16px;
+  }
+  .row .lab{display:flex;flex-direction:column;gap:2px}
+  .row .lab b{font-family:var(--display);font-weight:600;letter-spacing:.16em;font-size:12px}
+  .row .lab span{color:var(--muted);font-size:11px}
+  .row .num{margin-left:auto;font-size:34px;font-weight:600;font-variant-numeric:tabular-nums}
+  #rPitch{border-left-color:var(--ax-y)} #rPitch .num{color:var(--ax-y)}
+  #rYaw{border-left-color:var(--ax-x)}   #rYaw .num{color:var(--ax-x)}
+  #rRoll{border-left-color:var(--ax-r)}  #rRoll .num{color:var(--ax-r)}
+
+  .grip{
+    display:flex;align-items:center;justify-content:center;gap:10px;
+    border:1px solid var(--line);border-radius:4px;background:var(--panel2);
+    padding:12px;font-family:var(--display);font-weight:600;letter-spacing:.18em;font-size:14px;
+  }
+  .grip.closed{color:var(--ax-r);border-color:var(--ax-r)}
+
+  button{
+    font-family:var(--display);font-weight:600;letter-spacing:.14em;font-size:14px;
+    text-transform:uppercase;border-radius:4px;padding:16px;cursor:pointer;border:1px solid var(--line);
+  }
+  #enable{background:var(--ax-y);border-color:var(--ax-y);color:#062a26}
+  #enable.on{background:var(--panel2);color:var(--ok);border-color:var(--line)}
+  #zero{background:var(--panel2);color:var(--ink)}
+  button:disabled{opacity:.45}
+  .hint{color:var(--faint);font-size:11px;line-height:1.6;text-align:center}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wordmark">GYRO<em>·</em>ARM <span style="color:var(--muted);letter-spacing:.06em;font-size:11px">/ controller</span></div>
+  <div class="chip" id="chip"><span class="dot"></span><span id="linkText">linking…</span></div>
+</header>
+
+<div class="rows">
+  <div class="row" id="rPitch">
+    <div class="lab"><b>PITCH</b><span>nose up / down → arm up / down</span></div>
+    <div class="num" id="nPitch">0.0°</div>
+  </div>
+  <div class="row" id="rYaw">
+    <div class="lab"><b>YAW</b><span>turn left / right → arm left / right</span></div>
+    <div class="num" id="nYaw">0.0°</div>
+  </div>
+  <div class="row" id="rRoll">
+    <div class="lab"><b>ROLL</b><span>twist right = grip · twist left = release</span></div>
+    <div class="num" id="nRoll">0.0°</div>
+  </div>
+</div>
+
+<div class="grip" id="grip">GRIP OPEN</div>
+
+<button id="enable">Enable motion</button>
+<button id="zero" disabled>Set neutral</button>
+<div class="hint" id="rotateWarn" style="display:none;color:var(--ax-r)">
+Rotate to portrait — the axis mapping assumes the phone is held upright/flat in portrait.</div>
+<div class="hint">Hold the phone flat like a remote, tap Enable motion, then Set neutral.<br>
+Keep this page in the foreground while driving.</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const TOKEN = {{ token|tojson }};
+  const AUTHQ = '?token=' + encodeURIComponent(TOKEN);
+  let ws = null, lastSend = 0, motionOn = false, gotValid = false, sensorTimer = null;
+
+  function setLink(ok, text) {
+    $('chip').classList.toggle('live', ok);
+    $('linkText').textContent = text;
+  }
+  function linkLabel() {
+    if (!motionOn) return 'linked';
+    return gotValid ? 'streaming' : 'waiting for sensor…';
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(proto + '://' + location.host + '/ws/controller' + AUTHQ);
+    ws.onopen  = () => setLink(true, linkLabel());
+    ws.onclose = () => { setLink(false, 'reconnecting…'); setTimeout(connect, 1000); };
+  }
+  connect();
+
+  const wrap = a => ((a + 180) % 360 + 360) % 360 - 180;
+
+  function onOrient(e) {
+    // Never fabricate zeros: a browser reporting null/NaN sensor fields is
+    // NOT a valid controller. Send only complete, finite readings.
+    const roll = e.gamma, pitch = e.beta, rawYaw = e.alpha;
+    if (![roll, pitch, rawYaw].every(Number.isFinite)) return;
+    if (!gotValid) {
+      gotValid = true;
+      clearTimeout(sensorTimer);
+      setLink(ws && ws.readyState === 1, linkLabel());
+    }
+    const yaw = wrap(rawYaw);
+    $('nPitch').textContent = pitch.toFixed(1) + '°';
+    $('nYaw').textContent   = yaw.toFixed(1)   + '°';
+    $('nRoll').textContent  = roll.toFixed(1)  + '°';
+
+    const now = performance.now();
+    if (ws && ws.readyState === 1 && now - lastSend > 33) {   // ~30 Hz
+      ws.send(JSON.stringify({ roll, pitch, yaw }));
+      lastSend = now;
+    }
+  }
+
+  async function enable() {
+    try {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const res = await DeviceOrientationEvent.requestPermission(); // must be inside a tap
+        if (res !== 'granted') { alert('Motion access was denied. Reload the page to try again.'); return; }
+      }
+      addEventListener('deviceorientation', onOrient);
+      motionOn = true;
+      $('enable').classList.add('on');
+      $('enable').textContent = 'Motion on';
+      $('zero').disabled = false;
+      setLink(ws && ws.readyState === 1, linkLabel());
+      // If no valid orientation event arrives shortly, say so instead of
+      // silently pretending to stream.
+      sensorTimer = setTimeout(() => {
+        if (!gotValid) {
+          setLink(false, 'no sensor data');
+          alert('No orientation data received. On iOS this page must be served ' +
+                'over HTTPS (run the server with --https) and opened in Safari.');
+        }
+      }, 3000);
+      try { await navigator.wakeLock.request('screen'); } catch (_) {}
+    } catch (err) {
+      alert('Motion sensors unavailable: ' + err + '\nOn iOS this page must be served over HTTPS.');
+    }
+  }
+
+  $('enable').addEventListener('click', enable);
+  $('zero').addEventListener('click', () => {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'calibrate' }));
+  });
+
+  // The axis mapping assumes portrait; warn when the phone is in landscape.
+  const landscape = matchMedia('(orientation: landscape)');
+  const updRotate = () => { $('rotateWarn').style.display = landscape.matches ? 'block' : 'none'; };
+  if (landscape.addEventListener) landscape.addEventListener('change', updRotate);
+  updRotate();
+
+  // Poll the server for the authoritative grip + connection state. Once we're
+  // streaming, the server's deadman decides whether we still are: if sensor
+  // events stop, the label must not keep saying "streaming".
+  setInterval(async () => {
+    try {
+      const s = await (await fetch('/api/state' + AUTHQ)).json();
+      $('grip').textContent = s.grip_closed ? 'GRIP CLOSED' : 'GRIP OPEN';
+      $('grip').classList.toggle('closed', s.grip_closed);
+      if (motionOn && gotValid && ws && ws.readyState === 1) {
+        setLink(Boolean(s.connected), s.connected ? 'streaming' : 'controller stale');
+      }
+    } catch (_) {}
+  }, 300);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+flask>=3.0
+flask-sock>=0.7
+# Used by the ROS 2 bridge for its low-latency WebSocket transport (it falls
+# back to stdlib HTTP polling without it) and by the WebSocket test suite,
+# which silently SKIPS if this is absent. Mirrors the bridge package.xml's
+# <exec_depend>python3-websocket</exec_depend>.
+websocket-client>=1.0
+# Optional -- only needed for `python app.py --https` (Safari web controller):
+# cryptography>=42
